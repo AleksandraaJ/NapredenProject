@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="mk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Habit Tracker | Следење на навики</title>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Vue.js & Chart.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-content">
+        <div class="logo">
+          <span class="logo-text"><span class="logo-highlight">H</span>abit<span class="logo-highlight">T</span>racker</span>
+        </div>
+        <button class="lang-toggle" @click="toggleLanguage">
+          {{ lang === 'mk' ? 'EN' : 'MK' }}
+        </button>
+      </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="hero-content">
+        <h1 class="hero-title">{{ t('heroTitle') }}</h1>
+        <p class="hero-subtitle">{{ t('heroSubtitle') }}</p>
+        
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-number">{{ doneTodayCount }}/{{ habits.length }}</div>
+            <div class="stat-label">{{ t('completedToday') }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number">{{ longestStreak }}</div>
+            <div class="stat-label">{{ t('longestStreak') }}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number">{{ totalCompletions }}</div>
+            <div class="stat-label">{{ t('totalCompletions') }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="hero-date">
+        <div class="date-label">{{ t('today') }}</div>
+        <div class="date-value">{{ todayLabel }}</div>
+      </div>
+    </section>
+
+    <!-- Error Banner -->
+    <div v-if="errorMessage" class="error-banner">
+      <span class="error-icon">⚠️</span>
+      {{ errorMessage }}
+      <button class="error-close" @click="errorMessage = ''">✕</button>
+    </div>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Add Habit Panel -->
+      <aside class="sidebar">
+        <div class="panel add-habit-panel">
+          <h2 class="panel-title">
+            <span class="panel-icon">➕</span>
+            {{ t('addHabit') }}
+          </h2>
+          <p class="panel-hint">{{ t('addHabitHint') }}</p>
+          
+          <form class="habit-form" @submit.prevent="addHabit">
+            <div class="form-group">
+              <label class="form-label">{{ t('habitName') }}</label>
+              <input
+                type="text"
+                class="form-input"
+                v-model.trim="newHabitName"
+                :placeholder="t('habitPlaceholder')"
+                maxlength="60"
+                :disabled="saving"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">{{ t('chooseIcon') }}</label>
+              <div class="icon-picker">
+                <span
+                  v-for="icon in icons"
+                  :key="icon"
+                  class="icon-option"
+                  :class="{ selected: icon === newHabitIcon }"
+                  @click="newHabitIcon = icon"
+                >{{ icon }}</span>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <label class="form-label">{{ t('chooseColor') }}</label>
+              <div class="color-picker">
+                <span
+                  v-for="c in palette"
+                  :key="c"
+                  class="color-swatch"
+                  :style="{ background: c }"
+                  :class="{ selected: c === newHabitColor }"
+                  @click="newHabitColor = c"
+                ></span>
+              </div>
+            </div>
+            
+            <button 
+              type="submit" 
+              class="btn btn-primary"
+              :disabled="!newHabitName || saving"
+            >
+              <span v-if="saving" class="spinner"></span>
+              {{ saving ? t('saving') : t('addHabitBtn') }}
+            </button>
+          </form>
+        </div>
+      </aside>
+
+      <!-- Habits List -->
+      <section class="habits-section">
+        <div v-if="loading" class="loading-state">
+          <div class="spinner large"></div>
+          <p>{{ t('loading') }}</p>
+        </div>
+
+        <div v-else-if="habits.length === 0" class="empty-state">
+          <div class="empty-icon">📝</div>
+          <h3>{{ t('noHabits') }}</h3>
+          <p>{{ t('noHabitsHint') }}</p>
+        </div>
+
+        <div v-else class="habits-grid">
+          <div
+            v-for="h in habits"
+            :key="h._id"
+            class="habit-card"
+            :style="{ '--habit-color': h.color }"
+          >
+            <div class="habit-header">
+              <span class="habit-icon">{{ h.icon || '📌' }}</span>
+              <div class="habit-info">
+                <h3 class="habit-name">{{ h.name }}</h3>
+                <span class="habit-streak">{{ streakText(h) }}</span>
+              </div>
+              <button 
+                class="btn-delete" 
+                @click="removeHabit(h._id)"
+                :title="t('deleteHabit')"
+              >
+                🗑️
+              </button>
+            </div>
+
+            <div class="week-tracker">
+              <div
+                v-for="(day, idx) in lastSevenDays"
+                :key="day.key"
+                class="day-cell"
+                :class="{ 
+                  done: isDone(h, day.key), 
+                  today: day.isToday,
+                  clickable: day.isToday
+                }"
+                @click="day.isToday && toggleDay(h, day.key)"
+              >
+                <span class="day-name">{{ day.short }}</span>
+                <span class="day-indicator">
+                  <span v-if="isDone(h, day.key)" class="check">✓</span>
+                </span>
+              </div>
+            </div>
+
+            <button
+              class="btn btn-toggle"
+              :class="{ completed: isDone(h, todayKey) }"
+              @click="toggleDay(h, todayKey)"
+            >
+              {{ isDone(h, todayKey) ? t('completedBtn') : t('markComplete') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Statistics -->
+        <div v-if="habits.length > 0" class="stats-panel">
+          <h2 class="panel-title">
+            <span class="panel-icon">📊</span>
+            {{ t('weeklyStats') }}
+          </h2>
+          <p class="panel-hint">{{ t('weeklyStatsHint') }}</p>
+          <div class="chart-container">
+            <canvas ref="chartCanvas"></canvas>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>{{ t('footerNote') }}</p>
+    </footer>
+
+    <!-- Confirm Modal -->
+    <Teleport to="body">
+      <div v-if="showConfirmModal" class="modal-overlay" @click.self="cancelDelete">
+        <div class="modal-content">
+          <div class="modal-icon">🗑️</div>
+          <h3 class="modal-title">{{ t('confirmDeleteTitle') }}</h3>
+          <p class="modal-message">{{ t('confirmDeleteMessage') }}</p>
+          <p class="modal-habit-name" v-if="habitToDelete">{{ habitToDelete.name }}</p>
+          <div class="modal-actions">
+            <button class="btn btn-cancel" @click="cancelDelete">
+              {{ t('cancel') }}
+            </button>
+            <button class="btn btn-danger" @click="confirmDelete">
+              {{ t('delete') }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
